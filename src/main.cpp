@@ -11,11 +11,17 @@
 
 #include <Adafruit_GFX.h>
 #include <Adafruit_NeoMatrix.h>
+#include <Adafruit_SHT31.h>
 #include <ArduinoJson.h>
+#include <Fonts/TomThumb.h>
 #include <HTTPClient.h>
+#include <RTClib.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include <Wire.h>
+#include <time.h>
 
+#include "config.h"
 #include "secrets.h"
 
 // ---- Hardware (Ulanzi TC001) -----------------------------------------------
@@ -37,11 +43,30 @@ static const uint8_t BTN_PINS[BTN_COUNT] = {26, 27, 14};
 static const uint16_t DEBOUNCE_MS = 30;
 static const uint16_t DOUBLE_CLICK_MS = 350;  // window to catch a second middle click
 
+// The piezo buzzer. Left floating it squeals, so we hold it low at boot (the way
+// the stock firmware does) and otherwise never touch it.
+static const uint8_t BUZZER_PIN = 15;
+
+// ---- On-board sensors (Ulanzi TC001) ---------------------------------------
+// One I2C bus carries the SHT3x temp/humidity sensor (0x44) and the DS3231 RTC
+// (0x68) — both confirmed by an I2C scan. They feed the two local screens, which
+// show device-intrinsic data no server could provide (the same reason the offline
+// glyph is baked in).
+static const uint8_t I2C_SDA = 21;
+static const uint8_t I2C_SCL = 22;
+RTC_DS3231 rtc;
+Adafruit_SHT31 sht;
+// The clock's timezone and NTP servers live in config.h (TIMEZONE, NTP_SERVER_*).
+
 // ---- Timing / limits -------------------------------------------------------
 static const uint32_t POLL_INTERVAL_MS = 60000;  // how often we fetch the payload
 static const uint8_t MAX_SCREENS = 8;             // caps memory; server sends few
 static const uint16_t DEFAULT_ROTATE_S = 8;
 static const uint32_t DEFAULT_STALE_S = 1800;  // 30 min, until the server says otherwise
+
+static const uint8_t LOCAL_SCREENS = 2;                     // clock + temp/humidity, always shown
+static const uint32_t CLOCK_SYNC_MS = 12UL * 3600 * 1000;  // re-sync RTC from NTP twice a day
+static const uint16_t TEMPHUM_SWAP_MS = 2000;              // temp/humidity screen alternates this often
 
 // ---- Screen model ----------------------------------------------------------
 struct Screen {
@@ -71,11 +96,26 @@ static uint8_t midClicks = 0;         // middle clicks counted inside the double
 static uint32_t midLastRelease = 0;   // millis() of the last middle release
 static bool midWaking = false;        // the press that woke from standby isn't a click
 
-// Amber warning triangle — the only glyph baked into the firmware, because when
-// we're offline there's no payload to pull an icon from.
+static bool clockValid = false;       // RTC holds a trusted time (from NTP or kept by its battery)
+static bool clockSynced = false;      // NTP has set the RTC at least once this boot
+static uint32_t lastClockSync = 0;    // millis() of the last NTP sync
+static uint32_t lastLocalTick = 0;    // paces the in-place refresh of the active local screen
+static bool tempHumPhase = false;     // false = temperature, true = humidity
+
+// Glyphs baked into the firmware. The alert is drawn when we're offline (no
+// payload to pull an icon from); the thermometer and droplet mark the local
+// sensor screen. Each is an 8x8 bitmap, MSB = leftmost column.
 static const uint8_t ALERT_GLYPH[8] = {
     0b00011000, 0b00011000, 0b00111100, 0b00100100,
     0b01100110, 0b01111110, 0b01100110, 0b11111111,
+};
+static const uint8_t THERMO_GLYPH[8] = {
+    0b00011000, 0b00011000, 0b00011000, 0b00011000,
+    0b00111100, 0b01111110, 0b01111110, 0b00111100,
+};
+static const uint8_t DROP_GLYPH[8] = {
+    0b00011000, 0b00011000, 0b00111100, 0b00111100,
+    0b01111110, 0b01111110, 0b01111110, 0b00111100,
 };
 
 // ---- Color helpers ---------------------------------------------------------
@@ -129,6 +169,24 @@ static bool connectWifi() {
   return false;
 }
 
+// ---- Clock -----------------------------------------------------------------
+// Pull the time over NTP (WiFi must be up) and write it into the DS3231, so the
+// clock stays accurate even while offline. Called opportunistically after a poll.
+static void syncClock() {
+  configTzTime(TIMEZONE, NTP_SERVER_1, NTP_SERVER_2);
+  struct tm t;
+  if (!getLocalTime(&t, 5000)) {
+    Serial.println("[atalaia] NTP: no answer");
+    return;  // retry next window
+  }
+  rtc.adjust(DateTime(t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec));
+  clockValid = true;
+  clockSynced = true;
+  lastClockSync = millis();
+  Serial.printf("[atalaia] NTP ok: %04d-%02d-%02d %02d:%02d\n", t.tm_year + 1900, t.tm_mon + 1,
+                t.tm_mday, t.tm_hour, t.tm_min);
+}
+
 // ---- Fetch -----------------------------------------------------------------
 static bool fetchScreens() {
   if (WiFi.status() != WL_CONNECTED && !connectWifi()) return false;
@@ -177,7 +235,15 @@ static bool fetchScreens() {
 }
 
 // ---- Render ----------------------------------------------------------------
+// Blit an 8x8 baked glyph into the left cell in one color.
+static void drawGlyph(const uint8_t glyph[8], uint16_t color) {
+  for (uint8_t y = 0; y < 8; y++)
+    for (uint8_t x = 0; x < 8; x++)
+      if (glyph[y] & (0x80 >> x)) matrix.drawPixel(x, y, color);
+}
+
 static void drawScreen(const Screen &s) {
+  matrix.setFont();  // default 5x7 font (a local screen may have left TomThumb set)
   matrix.fillScreen(0);
   for (uint8_t y = 0; y < 8; y++)
     for (uint8_t x = 0; x < 8; x++) matrix.drawPixel(x, y, s.icon[y * 8 + x]);
@@ -197,10 +263,9 @@ static void drawScreen(const Screen &s) {
 
 static void drawAlert() {
   const uint16_t amber = matrix.Color(255, 120, 0);
+  matrix.setFont();
   matrix.fillScreen(0);
-  for (uint8_t y = 0; y < 8; y++)
-    for (uint8_t x = 0; x < 8; x++)
-      if (ALERT_GLYPH[y] & (0x80 >> x)) matrix.drawPixel(x, y, amber);
+  drawGlyph(ALERT_GLYPH, amber);
   matrix.setTextWrap(false);
   matrix.setCursor(12, 1);
   matrix.setTextColor(amber);
@@ -208,17 +273,95 @@ static void drawAlert() {
   matrix.show();
 }
 
+// Local screen: a little calendar with the day-of-month on the left, HH:MM (24h,
+// small font) on the right. Reads the DS3231; shows dashes until the clock is set.
+static void drawClock() {
+  matrix.fillScreen(0);
+  DateTime now = rtc.now();
+
+  matrix.fillRect(0, 0, 8, 8, matrix.Color(35, 35, 40));  // calendar body
+  matrix.fillRect(0, 0, 8, 2, matrix.Color(200, 40, 40));  // binding strip on top
+  matrix.setFont(&TomThumb);
+  matrix.setTextWrap(false);
+  matrix.setTextColor(matrix.Color(255, 255, 255));
+  matrix.setCursor(1, 7);  // TomThumb baseline sits at the cursor y
+  if (clockValid) {
+    char day[3];
+    snprintf(day, sizeof(day), "%02d", now.day());
+    matrix.print(day);
+  } else {
+    matrix.print("--");
+  }
+
+  matrix.setTextColor(matrix.Color(0, 180, 255));
+  matrix.setCursor(10, 6);
+  if (clockValid) {
+    char hhmm[6];
+    snprintf(hhmm, sizeof(hhmm), "%02d:%02d", now.hour(), now.minute());
+    matrix.print(hhmm);
+  } else {
+    matrix.print("--:--");
+  }
+
+  matrix.setFont();  // restore default for the other screens
+  matrix.show();
+}
+
+// Local screen: alternates between temperature and humidity from the SHT3x, each
+// with its glyph on the left and the value in the default font on the right.
+static void drawTempHum(bool humidity) {
+  matrix.setFont();
+  matrix.fillScreen(0);
+  matrix.setTextWrap(false);
+  char buf[8];
+  if (!humidity) {
+    float t = sht.readTemperature();
+    drawGlyph(THERMO_GLYPH, matrix.Color(255, 80, 0));
+    if (isnan(t)) strlcpy(buf, "--", sizeof(buf));
+    else snprintf(buf, sizeof(buf), "%.0f\xF7", t);  // 0xF7 = degree ring in the default font
+    matrix.setTextColor(matrix.Color(255, 160, 40));
+  } else {
+    float h = sht.readHumidity();
+    drawGlyph(DROP_GLYPH, matrix.Color(0, 140, 255));
+    if (isnan(h)) strlcpy(buf, "--", sizeof(buf));
+    else snprintf(buf, sizeof(buf), "%.0f%%", h);
+    matrix.setTextColor(matrix.Color(80, 180, 255));
+  }
+  matrix.setCursor(11, 1);
+  matrix.print(buf);
+  matrix.show();
+}
+
 static bool isStale() {
   return !haveData || (millis() - lastSuccess) > staleAfterMs;
+}
+
+// The rotation is [primary slots] + [clock] + [temp/humidity]. The primary slots
+// are the server screens when fresh, or a single offline glyph when stale — so we
+// never show a stale server number, but the local screens stay visible either way.
+static uint8_t primarySlots() { return isStale() ? 1 : screenCount; }
+static uint8_t totalSlots() { return primarySlots() + LOCAL_SCREENS; }
+
+static void drawCurrent() {
+  uint8_t primary = primarySlots();
+  if (currentScreen < primary) {
+    if (isStale()) drawAlert();
+    else drawScreen(screens[currentScreen]);
+  } else if (currentScreen == primary) {
+    drawClock();
+  } else {
+    drawTempHum(tempHumPhase);
+  }
 }
 
 // ---- Buttons ---------------------------------------------------------------
 // Step the current screen by delta (±1), wrapping, and reset the rotation clock
 // so an auto-advance doesn't fire on top of a manual move.
 static void stepScreen(int8_t delta) {
-  if (screenCount == 0) return;
-  currentScreen = (currentScreen + screenCount + delta) % screenCount;
+  uint8_t total = totalSlots();
+  currentScreen = (currentScreen + total + delta) % total;
   lastRotate = millis();
+  lastLocalTick = millis();
   needsRedraw = true;
 }
 
@@ -282,6 +425,10 @@ static void handleButtons() {
 // ---- Lifecycle -------------------------------------------------------------
 void setup() {
   Serial.begin(115200);
+  pinMode(BUZZER_PIN, OUTPUT);
+  digitalWrite(BUZZER_PIN, LOW);  // silence the piezo before anything else
+  Serial.println("\n[atalaia] boot");
+
   for (uint8_t i = 0; i < BTN_COUNT; i++) pinMode(BTN_PINS[i], INPUT_PULLUP);
   matrix.begin();
   matrix.setBrightness(BRIGHTNESS);
@@ -289,10 +436,18 @@ void setup() {
   matrix.fillScreen(0);
   matrix.show();
 
+  Wire.begin(I2C_SDA, I2C_SCL);
+  Serial.printf("[atalaia] rtc.begin=%d lostPower=%d  sht.begin=%d\n", rtc.begin(),
+                rtc.lostPower(), sht.begin(0x44));
+  if (!rtc.lostPower()) clockValid = true;  // the RTC battery kept a real time
+
   if (fetchScreens()) {
     haveData = true;
     lastSuccess = millis();
   }
+  Serial.printf("[atalaia] boot fetch: %u screens, wifi=%d\n", screenCount,
+                WiFi.status() == WL_CONNECTED);
+  if (WiFi.status() == WL_CONNECTED) syncClock();  // set the RTC from NTP on boot
   lastPoll = millis();
 }
 
@@ -313,23 +468,42 @@ void loop() {
       lastSuccess = now;
       needsRedraw = true;
     }
+    if (WiFi.status() == WL_CONNECTED && (!clockSynced || now - lastClockSync >= CLOCK_SYNC_MS))
+      syncClock();
+    DateTime t = rtc.now();
+    Serial.printf("[atalaia] poll: screens=%u stale=%d clock=%02d:%02d temp=%.1f hum=%.1f\n",
+                  screenCount, isStale(), t.hour(), t.minute(), sht.readTemperature(),
+                  sht.readHumidity());
   }
 
-  if (isStale()) {
-    drawAlert();
-    delay(20);  // short, so a button press still registers promptly
-    return;
+  uint8_t total = totalSlots();
+  if (currentScreen >= total) {  // rotation shrank (e.g. went stale); wrap back in
+    currentScreen = 0;
+    needsRedraw = true;
   }
 
-  // Auto-advance unless the user paused rotation with the middle button.
+  // Auto-advance unless the user paused rotation with a single middle click.
   if (autoRotate && now - lastRotate >= (uint32_t)rotateSeconds * 1000UL) {
-    currentScreen = (currentScreen + 1) % screenCount;
+    currentScreen = (currentScreen + 1) % total;
     lastRotate = now;
+    lastLocalTick = now;
+    needsRedraw = true;
+  }
+
+  // Local screens refresh in place while shown: the clock ticks every second, the
+  // temp/humidity screen alternates between its two readings.
+  uint8_t primary = primarySlots();
+  if (currentScreen == primary && now - lastLocalTick >= 1000) {
+    lastLocalTick = now;
+    needsRedraw = true;
+  } else if (currentScreen == primary + 1 && now - lastLocalTick >= TEMPHUM_SWAP_MS) {
+    lastLocalTick = now;
+    tempHumPhase = !tempHumPhase;
     needsRedraw = true;
   }
 
   if (needsRedraw) {
-    drawScreen(screens[currentScreen]);
+    drawCurrent();
     needsRedraw = false;
   }
 
