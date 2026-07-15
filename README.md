@@ -48,13 +48,16 @@ The three top-edge buttons drive navigation locally, without touching the server
 | button | action |
 | :--- | :--- |
 | left | previous screen |
-| middle | pause / resume auto-rotation |
+| middle — single click | pause / resume auto-rotation |
+| middle — double click | standby (panel off) / press again to wake |
 | right | next screen |
 
 Stepping left or right resets the rotation timer, so a manual move never fights an
 auto-advance. Pausing freezes the current screen; new data still fetches in the
-background and the frozen screen refreshes in place. The pins (`26` / `27` / `14`)
-match the TC001 — verify on hardware if a press does nothing on first flash.
+background and the frozen screen refreshes in place. A double click blanks the
+panel and stops polling; the next middle press wakes it and refetches. The pins
+(`26` / `27` / `14`) match the TC001 — verify on hardware if a press does nothing
+on first flash.
 
 ## The offline glyph
 

@@ -35,6 +35,7 @@ Adafruit_NeoMatrix matrix(32, 8, MATRIX_PIN,
 enum Btn { BTN_LEFT, BTN_MID, BTN_RIGHT, BTN_COUNT };
 static const uint8_t BTN_PINS[BTN_COUNT] = {26, 27, 14};
 static const uint16_t DEBOUNCE_MS = 30;
+static const uint16_t DOUBLE_CLICK_MS = 350;  // window to catch a second middle click
 
 // ---- Timing / limits -------------------------------------------------------
 static const uint32_t POLL_INTERVAL_MS = 60000;  // how often we fetch the payload
@@ -60,11 +61,15 @@ static uint32_t lastRotate = 0;
 static uint32_t lastSuccess = 0;  // millis() of the last good fetch
 static bool haveData = false;
 
-static bool autoRotate = true;    // middle button toggles this
+static bool autoRotate = true;    // a single middle click toggles this
+static bool displayOn = true;     // a double middle click drops to standby
 static bool needsRedraw = true;   // set by rotation or a button; drawn once per tick
 
 static bool btnState[BTN_COUNT] = {false, false, false};   // debounced pressed state
 static uint32_t btnChange[BTN_COUNT] = {0, 0, 0};          // millis() of last accepted edge
+static uint8_t midClicks = 0;         // middle clicks counted inside the double-click window
+static uint32_t midLastRelease = 0;   // millis() of the last middle release
+static bool midWaking = false;        // the press that woke from standby isn't a click
 
 // Amber warning triangle — the only glyph baked into the firmware, because when
 // we're offline there's no payload to pull an icon from.
@@ -217,22 +222,61 @@ static void stepScreen(int8_t delta) {
   needsRedraw = true;
 }
 
-// Poll the buttons, act on each press edge. Simple debounce: ignore any change
+// Turn the panel on (redraw the current screen) or off (blank it, stop drawing).
+static void setDisplayOn(bool on) {
+  displayOn = on;
+  if (on) {
+    matrix.setBrightness(BRIGHTNESS);
+    needsRedraw = true;
+  } else {
+    matrix.fillScreen(0);
+    matrix.show();
+  }
+}
+
+// Poll the buttons and act on their edges. Simple debounce: ignore any change
 // that lands within DEBOUNCE_MS of the last accepted one for that button.
+//
+// Middle button: while on, a single click toggles rotation and a double click
+// drops to standby; while off, any press wakes it. The single-click action waits
+// out the double-click window so a double click never also toggles rotation.
 static void handleButtons() {
   uint32_t now = millis();
+
+  bool pressedEdge[BTN_COUNT] = {false, false, false};
+  bool releasedEdge[BTN_COUNT] = {false, false, false};
   for (uint8_t i = 0; i < BTN_COUNT; i++) {
     bool raw = digitalRead(BTN_PINS[i]) == LOW;  // active-low
     if (raw == btnState[i] || now - btnChange[i] < DEBOUNCE_MS) continue;
     btnState[i] = raw;
     btnChange[i] = now;
-    if (!raw) continue;  // act on press, not release
-    switch (i) {
-      case BTN_LEFT:  stepScreen(-1); break;
-      case BTN_RIGHT: stepScreen(+1); break;
-      case BTN_MID:   autoRotate = !autoRotate; lastRotate = now; break;
+    (raw ? pressedEdge : releasedEdge)[i] = true;
+  }
+
+  if (pressedEdge[BTN_MID] && !displayOn) {  // wake from standby
+    setDisplayOn(true);
+    midClicks = 0;
+    midWaking = true;
+  }
+  if (releasedEdge[BTN_MID]) {
+    if (midWaking) {
+      midWaking = false;  // the wake press doesn't count as a click
+    } else if (displayOn) {
+      midLastRelease = now;
+      if (++midClicks >= 2) {  // double click → standby
+        midClicks = 0;
+        setDisplayOn(false);
+      }
     }
   }
+  if (midClicks == 1 && now - midLastRelease > DOUBLE_CLICK_MS) {  // lone click → toggle
+    midClicks = 0;
+    autoRotate = !autoRotate;
+    lastRotate = now;
+  }
+
+  if (displayOn && pressedEdge[BTN_LEFT]) stepScreen(-1);
+  if (displayOn && pressedEdge[BTN_RIGHT]) stepScreen(+1);
 }
 
 // ---- Lifecycle -------------------------------------------------------------
@@ -256,6 +300,11 @@ void loop() {
   uint32_t now = millis();
 
   handleButtons();
+
+  if (!displayOn) {  // standby: panel dark, nothing to poll or draw
+    delay(20);
+    return;
+  }
 
   if (now - lastPoll >= POLL_INTERVAL_MS) {
     lastPoll = now;
