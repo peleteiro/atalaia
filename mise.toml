@@ -1,8 +1,14 @@
 # Atalaia — dev environment. Tasks are file-based scripts in .config/mise/tasks/.
 [tools]
+# uv backs the pipx installs below (hermetic Python tooling, no system pipx).
+"uv" = "latest"
 # PlatformIO is a Python package — install it via the pipx backend so `pio` is
 # hermetic and reproducible, not dependent on a system/homebrew install.
 "pipx:platformio" = "latest"
+# clang-format formats the firmware (`mise run lint`); pipx wheel ships the binary.
+"pipx:clang-format" = "latest"
+# lefthook manages the git hooks (runs the formatter on commit).
+"lefthook" = "latest"
 
 [env]
 # Puts `.config/bin` on PATH so the `mr` alias (= mise run) is reachable.

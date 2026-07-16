@@ -66,6 +66,8 @@ Middle button wakes deep sleep via `ext0` on GPIO 27. `upload_speed` is 115200
 
 ```bash
 mise run build     # compile (pio run)
+mise run check     # static analysis (cppcheck via pio check)
+mise run lint      # format the firmware in place (clang-format)
 mise run upload    # build + flash over USB
 mise run monitor   # serial logs @ 115200
 mise run upgrade   # update ESP32 platform + library deps

@@ -1,0 +1,6 @@
+# Firmware C++ style. Google base, tuned to the existing code.
+BasedOnStyle: Google
+IndentWidth: 2
+ColumnLimit: 100
+PointerAlignment: Right
+DerivePointerAlignment: false

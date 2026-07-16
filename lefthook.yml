@@ -1,0 +1,9 @@
+# Git hooks, managed by lefthook. Install once with `mise exec -- lefthook install`
+# (or just `lefthook install` in a mise-activated shell). On commit, the staged
+# firmware sources are formatted with clang-format and the result re-staged.
+pre-commit:
+  commands:
+    lint:
+      glob: "src/*.{cpp,h}"
+      run: mise exec -- clang-format -i {staged_files}
+      stage_fixed: true

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Format the firmware in place (clang-format)"
+set -euo pipefail
+git ls-files -z 'src/*.cpp' 'src/*.h' | xargs -0 clang-format -i

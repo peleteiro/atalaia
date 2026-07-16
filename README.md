@@ -110,6 +110,8 @@ with a fresh face is worse than one that admits it's blind. The local screens
    [PlatformIO](https://platformio.org)):
    ```bash
    mise run build     # compile
+   mise run check     # static analysis (cppcheck)
+   mise run lint      # format the firmware (clang-format)
    mise run upload    # build + flash over USB
    mise run monitor   # serial logs at 115200
    ```

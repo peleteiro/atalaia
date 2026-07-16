@@ -1,0 +1,8 @@
+{
+  "includeCoAuthoredBy": false,
+  "permissions": {
+    "allow": ["Bash", "Edit", "Write", "Read", "Glob", "Grep", "WebFetch", "WebSearch", "Skill", "Task"],
+    "deny": ["Bash(rm -rf /)", "Bash(rm -rf .git)", "Bash(docker system prune:*)"]
+  },
+  "respectGitignore": true
+}

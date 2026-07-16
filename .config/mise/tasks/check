@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Static analysis / lint (cppcheck via pio check)"
+set -euo pipefail
+exec pio check
