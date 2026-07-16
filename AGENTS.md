@@ -47,11 +47,20 @@ Read `README.md` for the payload contract before touching rendering or fetch cod
 
 | Path | Purpose |
 | :--- | :--- |
-| `src/main.cpp` | The firmware: WiFi, HTTPS fetch, JSON parse, render, rotation, offline glyph. |
+| `src/main.cpp` | The firmware: WiFi, HTTPS fetch, JSON parse, render, rotation, buttons (standby / deep sleep), local clock + sensor screens, offline glyph. |
+| `src/config.h` | Non-secret config (clock timezone, NTP servers). Committed — edit in place. |
 | `src/secrets.example.h` | Template for credentials. Copy to `src/secrets.h` (gitignored). |
-| `platformio.ini` | Board, framework, library deps. |
+| `platformio.ini` | Board, framework, library deps, `upload_speed`. |
 | `.config/mise/tasks/` | File-based mise tasks (build/upload/monitor/clean). |
 | `.agents/` | Agent skills + rules. `.claude/` symlinks into here. |
+
+## Hardware (Ulanzi TC001), confirmed on device
+
+Matrix 32×8 on GPIO 32, **serpentine** (`NEO_MATRIX_ZIGZAG` — not `PROGRESSIVE`).
+Buttons active-low: left 26, middle 27, right 14. Piezo buzzer 15 (held low or it
+squeals). I2C `SDA 21` / `SCL 22`: SHT3x temp/humidity `0x44`, DS3231 RTC `0x68`.
+Middle button wakes deep sleep via `ext0` on GPIO 27. `upload_speed` is 115200
+(higher was flaky). Full notes in `README.md`.
 
 ## Workflow
 
