@@ -100,6 +100,45 @@ checksum = "sha256:f2b069483c21fe570f20f3cd2f556b1eae0e671027679dbafdd65121b2ed7
 url = "https://github.com/google-antigravity/antigravity-cli/releases/download/1.1.4/agy_cli_windows_x64.zip"
 url_api = "https://api.github.com/repos/google-antigravity/antigravity-cli/releases/assets/480972445"
 
+[[tools."github:wokwi/wokwi-cli"]]
+version = "0.26.1"
+backend = "github:wokwi/wokwi-cli"
+
+[tools."github:wokwi/wokwi-cli"."platforms.linux-arm64"]
+checksum = "sha256:205dc0cf6cb94fac6bf3f4b17fe9f17b0c03324ddd02d866c040ca125901b1e7"
+url = "https://github.com/wokwi/wokwi-cli/releases/download/v0.26.1/wokwi-cli-linuxstatic-arm64"
+url_api = "https://api.github.com/repos/wokwi/wokwi-cli/releases/assets/360906516"
+
+[tools."github:wokwi/wokwi-cli"."platforms.linux-arm64-musl"]
+checksum = "sha256:205dc0cf6cb94fac6bf3f4b17fe9f17b0c03324ddd02d866c040ca125901b1e7"
+url = "https://github.com/wokwi/wokwi-cli/releases/download/v0.26.1/wokwi-cli-linuxstatic-arm64"
+url_api = "https://api.github.com/repos/wokwi/wokwi-cli/releases/assets/360906516"
+
+[tools."github:wokwi/wokwi-cli"."platforms.linux-x64"]
+checksum = "sha256:72d968150babaf7532c47ab7741eb85a95a6c3e3cfef91ffbcfdb677fd38e811"
+url = "https://github.com/wokwi/wokwi-cli/releases/download/v0.26.1/wokwi-cli-linuxstatic-x64"
+url_api = "https://api.github.com/repos/wokwi/wokwi-cli/releases/assets/360906485"
+
+[tools."github:wokwi/wokwi-cli"."platforms.linux-x64-musl"]
+checksum = "sha256:72d968150babaf7532c47ab7741eb85a95a6c3e3cfef91ffbcfdb677fd38e811"
+url = "https://github.com/wokwi/wokwi-cli/releases/download/v0.26.1/wokwi-cli-linuxstatic-x64"
+url_api = "https://api.github.com/repos/wokwi/wokwi-cli/releases/assets/360906485"
+
+[tools."github:wokwi/wokwi-cli"."platforms.macos-arm64"]
+checksum = "sha256:f965122dc8fba3d5bf68b76ed0143c7b4ce609102c2f08243c111989b2409bcb"
+url = "https://github.com/wokwi/wokwi-cli/releases/download/v0.26.1/wokwi-cli-macos-arm64"
+url_api = "https://api.github.com/repos/wokwi/wokwi-cli/releases/assets/360906461"
+
+[tools."github:wokwi/wokwi-cli"."platforms.macos-x64"]
+checksum = "sha256:8a1a9b8a340de64c5d2cdc0d25c7e15136535265acc441957f04b23f4fe18b40"
+url = "https://github.com/wokwi/wokwi-cli/releases/download/v0.26.1/wokwi-cli-macos-x64"
+url_api = "https://api.github.com/repos/wokwi/wokwi-cli/releases/assets/360906448"
+
+[tools."github:wokwi/wokwi-cli"."platforms.windows-x64"]
+checksum = "sha256:f69c6cb3053dd27c86c2fa66389b825d296bdaf099bbd2ad9ce9536db2d9515c"
+url = "https://github.com/wokwi/wokwi-cli/releases/download/v0.26.1/wokwi-cli-win-x64.exe"
+url_api = "https://api.github.com/repos/wokwi/wokwi-cli/releases/assets/360906429"
+
 [[tools.jq]]
 version = "1.8.2"
 backend = "aqua:jqlang/jq"

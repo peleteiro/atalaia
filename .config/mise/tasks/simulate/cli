@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+#MISE description="Build and run Watchlight headlessly in the Wokwi CLI"
+set -euo pipefail
+
+if [[ -z "${WOKWI_CLI_TOKEN:-}" ]]; then
+  echo "WOKWI_CLI_TOKEN is required for terminal simulation." >&2
+  echo "Copy mise.local.example.toml to mise.local.toml and add a token from:" >&2
+  echo "https://wokwi.com/dashboard/ci" >&2
+  exit 1
+fi
+
+mise run simulate-build
+exec wokwi-cli . --interactive --timeout 0

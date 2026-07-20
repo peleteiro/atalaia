@@ -1,5 +1,12 @@
 .pio/
-.vscode/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+
+# Developer-local mise configuration and its optional lockfile may contain secrets.
+mise.local.toml
+mise.local.lock
 
 # Local AI assistant state; project-scoped settings remain versioned.
 .claude/settings.local.json

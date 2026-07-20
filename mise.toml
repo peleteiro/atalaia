@@ -11,6 +11,8 @@
 "pipx:clang-format" = "latest"
 # lefthook manages the git hooks (runs the formatter on commit).
 "lefthook" = "latest"
+# Wokwi CLI validates the circuit and supports headless simulation.
+"github:wokwi/wokwi-cli" = { version = "latest", bin = "wokwi-cli" }
 
 # AI agent CLIs, matching the shared Claude/Codex/Antigravity setup.
 "aqua:anthropics/claude-code" = "2"

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Build the firmware for Wokwi"
+set -euo pipefail
+exec pio run -e wokwi

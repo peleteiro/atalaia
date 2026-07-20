@@ -7,6 +7,12 @@
 // both server-provided and local screens.
 #define SCREEN_ROTATION_SECONDS 8
 
+// Payload polling cadence. While the current payload is fresh, conserve network
+// and battery by polling every 15 minutes. Once it becomes stale (or before the
+// first successful fetch), retry every minute so recovery is quick.
+#define POLL_INTERVAL_FRESH_SECONDS (15UL * 60UL)
+#define POLL_INTERVAL_STALE_SECONDS (1UL * 60UL)
+
 // POSIX timezone string for the clock. Default: São Paulo / Brazil (UTC-3, no DST).
 // Change to match where the display lives, e.g.:
 //   "PST8PDT,M3.2.0,M11.1.0"          US Pacific

@@ -1,0 +1,24 @@
+{
+  "C_Cpp.default.configurationProvider": "platformio.platformio-ide",
+  "files.exclude": {
+    "**/.pio": true
+  },
+  "files.watcherExclude": {
+    "**/.pio/**": true
+  },
+  "search.exclude": {
+    "**/.pio": true
+  },
+  "[c]": {
+    "editor.defaultFormatter": "ms-vscode.cpptools",
+    "editor.formatOnSave": true
+  },
+  "[cpp]": {
+    "editor.defaultFormatter": "ms-vscode.cpptools",
+    "editor.formatOnSave": true
+  },
+  "[toml]": {
+    "editor.defaultFormatter": "tombi-toml.tombi",
+    "editor.formatOnSave": true
+  }
+}

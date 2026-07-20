@@ -18,9 +18,10 @@ code. `README.md` provides the project overview.
 ## Golden rules
 
 1. **Task runner is `mise`.** Never call `pio` directly in docs or scripts — use
-   the `mise run build` / `check` / `lint` / `upload` / `monitor` / `upgrade` /
-   `clean` tasks. Tasks are file-based scripts in `.config/mise/tasks/`, never
-   inline in `.mise.toml`.
+   the `mise run build` / `check` / `lint` / `simulate-build` / `simulate` /
+   `simulate:vscode` / `simulate:cli` / `upload` / `monitor` / `upgrade` / `clean`
+   tasks. Tasks are file-based scripts in `.config/mise/tasks/`, never inline in
+   `.mise.toml`.
 2. **Never commit `src/secrets.h`.** It holds WiFi passwords and the API token and
    is gitignored. Edits to the *shape* of secrets go in `src/secrets.example.h`.
 3. **The device must never lie.** If data is older than `staleAfter`, show the
@@ -52,13 +53,16 @@ code. `README.md` provides the project overview.
 | Path | Purpose |
 | :--- | :--- |
 | `src/main.cpp` | The firmware: WiFi, HTTPS fetch, JSON parse, render, rotation, buttons (standby / deep sleep), local clock + sensor screens, offline glyph. |
-| `src/config.h` | Non-secret config (screen rotation, clock, sensors). Committed — edit in place. |
+| `src/config.h` | Non-secret config (screen rotation, polling, clock, sensors). Committed — edit in place. |
 | `src/secrets.example.h` | Template for credentials. Copy to `src/secrets.h` (gitignored). |
+| `mise.local.example.toml` | Template for developer-local mise secrets such as `WOKWI_CLI_TOKEN`; copy to ignored `mise.local.toml`. |
 | `docs/payload.md` | Canonical transport and JSON payload contract. |
 | `schema/watchlight-payload.schema.json` | JSON Schema Draft 2020-12 for provider payloads. |
 | `examples/payload.json` | Complete payload fixture that validates against the schema. |
 | `platformio.ini` | Board, framework, library deps, `upload_speed`. |
-| `.config/mise/tasks/` | File-based mise tasks for build, checks, formatting, flashing, monitoring, upgrades, and cleanup. |
+| `diagram.json` / `wokwi.toml` | Wokwi circuit and firmware paths for visual/headless simulation. |
+| `.vscode/` | Recommended firmware/Wokwi extensions, focused workspace settings, and mise-backed editor tasks. |
+| `.config/mise/tasks/` | File-based mise tasks for build, checks, formatting, simulation, flashing, monitoring, upgrades, and cleanup. |
 | `.agents/` | Shared agent skills, always-on rules, and the Antigravity MCP config. |
 | `.claude/` | Claude project settings, format hook, and skills symlink. |
 | `.codex/` | Codex sandbox, command policy, and format hook. |
@@ -75,17 +79,27 @@ Middle button wakes deep sleep via `ext0` on GPIO 27. `upload_speed` is 115200
 ## Workflow
 
 ```bash
-mise run build     # compile (pio run)
-mise run check     # static analysis (cppcheck via pio check)
-mise run lint      # format the firmware in place (clang-format)
-mise run upload    # build + flash over USB
-mise run monitor   # serial logs @ 115200
-mise run upgrade   # update ESP32 platform + library deps
-mise run clean     # wipe build artifacts
+mise run build          # compile (pio run)
+mise run check          # static analysis + Wokwi diagram validation
+mise run lint           # format the firmware in place (clang-format)
+mise run simulate-build # compile the Wokwi target
+mise run simulate        # visual Wokwi simulator in VS Code (default)
+mise run simulate:vscode # explicitly select the VS Code simulator
+mise run simulate:cli    # headless Wokwi run; requires WOKWI_CLI_TOKEN
+mise run upload         # build + flash over USB
+mise run monitor        # serial logs @ 115200
+mise run upgrade        # update ESP32 platform + library deps
+mise run clean          # wipe build artifacts
 ```
 
-First build downloads the ESP32 toolchain (~minutes). Flashing needs the device on
-USB; the port is auto-detected.
+First build downloads the ESP32 toolchain (~minutes). The Wokwi target uses the
+local `src/secrets.h`, but connects through `Wokwi-GUEST`; its compiled artifact
+must stay private. `mise run simulate` builds it and opens `diagram.json` in the
+project's VS Code workspace by default; `mise run simulate:vscode` selects that
+variant explicitly. Install the recommended extensions when prompted, then start
+the Wokwi simulator. Headless simulation uses `mise run simulate:cli` and reads
+`WOKWI_CLI_TOKEN` from the ignored `mise.local.toml`; `mise run clean` preserves
+that file. Flashing needs the device on USB; the port is auto-detected.
 
 ## AI assistants
 

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
 #MISE description="Remove build artifacts"
 set -euo pipefail
-exec pio run -t clean
+# Clean only PlatformIO artifacts. Preserve mise.local.toml: it may hold the
+# developer's Wokwi CI token and is not generated build output.
+exec pio run -t clean -e ulanzi-tc001 -e wokwi

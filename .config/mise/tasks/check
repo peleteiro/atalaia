@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Static analysis / lint (cppcheck via pio check)"
+#MISE description="Static analysis and Wokwi diagram validation"
 set -euo pipefail
-exec pio check
+pio check
+wokwi-cli lint

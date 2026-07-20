@@ -95,6 +95,10 @@ remote screens from the rotation and shows the offline alert. Device-local clock
 sensor, and low-battery screens remain available because they do not depend on
 the endpoint.
 
+Polling cadence is also device-local, not part of this contract. The firmware
+uses `POLL_INTERVAL_FRESH_SECONDS` while the payload is fresh and
+`POLL_INTERVAL_STALE_SECONDS` once it is stale; both live in `src/config.h`.
+
 ## Rotation
 
 Rotation timing is not part of the JSON contract. The firmware uses

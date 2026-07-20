@@ -58,13 +58,24 @@ static const uint8_t BUZZER_PIN = 15;
 // glyph is baked in).
 static const uint8_t I2C_SDA = 21;
 static const uint8_t I2C_SCL = 22;
+#ifdef WATCHLIGHT_WOKWI
+// Wokwi does not model the DS3231, so its compatible DS1307 stands in for clock
+// rendering. Physical builds continue to use the TC001's real DS3231.
+RTC_DS1307 rtc;
+#else
 RTC_DS3231 rtc;
+#endif
 Adafruit_SHT31 sht;
 // The clock's timezone and NTP servers live in config.h (TIMEZONE, NTP_SERVER_*).
 
 // ---- Timing / limits -------------------------------------------------------
-static const uint32_t POLL_INTERVAL_MS = 60000;  // how often we fetch the payload
-static const uint8_t MAX_SCREENS = 16;           // caps memory; server sends few
+static_assert(POLL_INTERVAL_FRESH_SECONDS > 0 && POLL_INTERVAL_FRESH_SECONDS <= UINT32_MAX / 1000UL,
+              "POLL_INTERVAL_FRESH_SECONDS must fit in milliseconds");
+static_assert(POLL_INTERVAL_STALE_SECONDS > 0 && POLL_INTERVAL_STALE_SECONDS <= UINT32_MAX / 1000UL,
+              "POLL_INTERVAL_STALE_SECONDS must fit in milliseconds");
+static const uint32_t POLL_INTERVAL_FRESH_MS = (uint32_t)POLL_INTERVAL_FRESH_SECONDS * 1000UL;
+static const uint32_t POLL_INTERVAL_STALE_MS = (uint32_t)POLL_INTERVAL_STALE_SECONDS * 1000UL;
+static const uint8_t MAX_SCREENS = 16;  // caps memory; server sends few
 static const uint32_t SCREEN_ROTATION_INTERVAL_MS = (uint32_t)SCREEN_ROTATION_SECONDS * 1000UL;
 static const uint32_t DEFAULT_STALE_S = 1800;             // 30 min, until the server says otherwise
 static const uint32_t MAX_STALE_S = UINT32_MAX / 1000UL;  // avoid overflow converting to ms
@@ -109,6 +120,7 @@ static bool midWaking = false;       // the press that woke from standby isn't a
 static uint32_t midPressStart = 0;   // millis() the middle button went down (for hold-to-off)
 static bool midHeldFired = false;    // the current hold already triggered power-off
 
+static bool rtcReady = false;       // the configured RTC answered on I2C
 static bool clockValid = false;     // RTC holds a trusted time (from NTP or kept by its battery)
 static bool clockSynced = false;    // NTP has set the RTC at least once this boot
 static uint32_t lastClockSync = 0;  // millis() of the last NTP sync
@@ -208,9 +220,18 @@ static bool parseIcon(JsonArray rows, uint16_t *out) {
 }
 
 // ---- WiFi ------------------------------------------------------------------
-// Join the first known network in range. Blocks up to a few seconds per attempt;
-// on failure the caller retries on the next loop tick.
+// On hardware, join the first known network in range. The Wokwi target uses its
+// virtual access point instead. Blocks up to a few seconds per attempt; on failure
+// the caller retries according to the current polling cadence.
 static bool connectWifi() {
+#ifdef WATCHLIGHT_WOKWI
+  // Wokwi cannot see the physical networks listed in secrets.h. It provides this
+  // open network instead; API_URL, API_TOKEN, and API_ROOT_CA still come from the
+  // real local secrets.h so the simulated device exercises the configured API.
+  WiFi.begin("Wokwi-GUEST", "");
+  for (int t = 0; t < 20 && WiFi.status() != WL_CONNECTED; t++) delay(250);
+  return WiFi.status() == WL_CONNECTED;
+#else
   int found = WiFi.scanNetworks();
   for (auto &net : WIFI_NETWORKS) {
     for (int i = 0; i < found; i++) {
@@ -225,12 +246,17 @@ static bool connectWifi() {
   }
   WiFi.scanDelete();
   return false;
+#endif
 }
 
 // ---- Clock -----------------------------------------------------------------
-// Pull the time over NTP (WiFi must be up) and write it into the DS3231, so the
-// clock stays accurate even while offline. Called opportunistically after a poll.
+// Pull the time over NTP (WiFi must be up) and write it into the RTC, so the clock
+// stays accurate even while offline. Called opportunistically after a poll.
 static void syncClock() {
+  if (!rtcReady) {
+    Serial.println("[watchlight] NTP: RTC unavailable");
+    return;
+  }
   configTzTime(TIMEZONE, NTP_SERVER_1, NTP_SERVER_2);
   struct tm t;
   if (!getLocalTime(&t, 5000)) {
@@ -247,7 +273,10 @@ static void syncClock() {
 
 // ---- Fetch -----------------------------------------------------------------
 static bool fetchScreens() {
-  if (WiFi.status() != WL_CONNECTED && !connectWifi()) return false;
+  if (WiFi.status() != WL_CONNECTED && !connectWifi()) {
+    Serial.println("[watchlight] fetch: WiFi unavailable");
+    return false;
+  }
 
   WiFiClientSecure client;
   if (strlen(API_ROOT_CA) > 0) {
@@ -259,11 +288,15 @@ static bool fetchScreens() {
   HTTPClient https;
   https.setConnectTimeout(8000);
   https.setTimeout(8000);
-  if (!https.begin(client, API_URL)) return false;
+  if (!https.begin(client, API_URL)) {
+    Serial.println("[watchlight] fetch: HTTPS setup failed");
+    return false;
+  }
   https.addHeader("x-device-token", API_TOKEN);
 
   int code = https.GET();
   if (code != 200) {
+    Serial.printf("[watchlight] fetch: HTTP %d\n", code);
     https.end();
     return false;
   }
@@ -272,21 +305,40 @@ static bool fetchScreens() {
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, https.getStream());
   https.end();
-  if (err) return false;
+  if (err) {
+    Serial.printf("[watchlight] fetch: invalid JSON (%s)\n", err.c_str());
+    return false;
+  }
 
   JsonArray arr = doc["screens"].as<JsonArray>();
-  if (arr.size() == 0 || arr.size() > MAX_SCREENS) return false;
+  if (arr.size() == 0 || arr.size() > MAX_SCREENS) {
+    Serial.printf("[watchlight] fetch: invalid screen count (%u)\n", (unsigned)arr.size());
+    return false;
+  }
 
   uint32_t staleS = doc["staleAfter"] | DEFAULT_STALE_S;
-  if (staleS == 0 || staleS > MAX_STALE_S) return false;
+  if (staleS == 0 || staleS > MAX_STALE_S) {
+    Serial.println("[watchlight] fetch: invalid staleAfter");
+    return false;
+  }
 
   // Validate every rendered field before changing the active screens. Metadata
   // such as ts/id is intentionally left to the stricter provider-side schema.
+  uint8_t index = 0;
   for (JsonObject s : arr) {
-    if (!isDisplayText(s["text"].as<const char *>()) ||
-        !isWebColor(s["color"].as<const char *>()) ||
-        !parseIcon(s["icon"].as<JsonArray>(), nullptr))
+    if (!isDisplayText(s["text"].as<const char *>())) {
+      Serial.printf("[watchlight] fetch: screen[%u] has invalid text\n", (unsigned)index);
       return false;
+    }
+    if (!isWebColor(s["color"].as<const char *>())) {
+      Serial.printf("[watchlight] fetch: screen[%u] has invalid color\n", (unsigned)index);
+      return false;
+    }
+    if (!parseIcon(s["icon"].as<JsonArray>(), nullptr)) {
+      Serial.printf("[watchlight] fetch: screen[%u] has invalid icon\n", (unsigned)index);
+      return false;
+    }
+    index++;
   }
 
   staleAfterMs = staleS * 1000UL;
@@ -299,6 +351,7 @@ static bool fetchScreens() {
   }
   screenCount = n;
   if (currentScreen >= screenCount) currentScreen = 0;
+  Serial.printf("[watchlight] fetch: accepted %u screens\n", (unsigned)screenCount);
   return screenCount > 0;
 }
 
@@ -360,8 +413,8 @@ static void drawDash(int16_t x, int16_t y, uint16_t color) {
 
 // Local screen, modeled on the stock Ulanzi clock: a 9px-wide white calendar page
 // with a red header and the day-of-month cut out of the white (drawn in black),
-// then HH:MM (24h) in white on the right. Reads the DS3231; shows dashes until the
-// clock is set. No seconds bar.
+// then HH:MM (24h) in white on the right. Reads the configured RTC; shows dashes
+// until the clock is set. No seconds bar.
 static void drawClock() {
   matrix.fillScreen(0);
   const uint16_t white = matrix.Color(255, 255, 255);
@@ -473,6 +526,10 @@ static void drawBattery() {
 }
 
 static bool isStale() { return !haveData || (millis() - lastSuccess) > staleAfterMs; }
+
+static uint32_t pollIntervalMs() {
+  return isStale() ? POLL_INTERVAL_STALE_MS : POLL_INTERVAL_FRESH_MS;
+}
 
 // The rotation is [primary slots] + [clock] + [temp/humidity] + [battery, if low].
 // The primary slots are the server screens when fresh, or a single offline glyph
@@ -627,9 +684,15 @@ void setup() {
   matrix.show();
 
   Wire.begin(I2C_SDA, I2C_SCL);
-  Serial.printf("[watchlight] rtc.begin=%d lostPower=%d  sht.begin=%d\n", rtc.begin(),
-                rtc.lostPower(), sht.begin(0x44));
-  if (!rtc.lostPower()) clockValid = true;  // the RTC battery kept a real time
+  rtcReady = rtc.begin();
+#ifdef WATCHLIGHT_WOKWI
+  clockValid = rtcReady && rtc.isrunning();
+#else
+  clockValid = rtcReady && !rtc.lostPower();  // the RTC battery kept a real time
+#endif
+  bool shtReady = sht.begin(0x44);
+  Serial.printf("[watchlight] rtc.begin=%d valid=%d  sht.begin=%d\n", rtcReady, clockValid,
+                shtReady);
   batteryPct = batteryPercent();
 
   if (fetchScreens()) {
@@ -652,7 +715,7 @@ void loop() {
     return;
   }
 
-  if (now - lastPoll >= POLL_INTERVAL_MS) {
+  if (now - lastPoll >= pollIntervalMs()) {
     lastPoll = now;
     batteryPct = batteryPercent();
     if (fetchScreens()) {
@@ -662,13 +725,17 @@ void loop() {
     }
     if (WiFi.status() == WL_CONNECTED && (!clockSynced || now - lastClockSync >= CLOCK_SYNC_MS))
       syncClock();
-    DateTime t = rtc.now();
+    char clockText[6] = "--:--";
+    if (clockValid) {
+      DateTime t = rtc.now();
+      snprintf(clockText, sizeof(clockText), "%02d:%02d", t.hour(), t.minute());
+    }
     Serial.printf(
-        "[watchlight] poll: screens=%u stale=%d clock=%02d:%02d temp=%.1f%c hum=%.1f batt=%u%% "
+        "[watchlight] poll: screens=%u stale=%d clock=%s temp=%.1f%c hum=%.1f batt=%u%% "
         "(adc "
         "%d)\n",
-        screenCount, isStale(), t.hour(), t.minute(), readTemperatureDisplay(),
-        TEMP_FAHRENHEIT ? 'F' : 'C', sht.readHumidity(), batteryPct, analogRead(BATTERY_PIN));
+        screenCount, isStale(), clockText, readTemperatureDisplay(), TEMP_FAHRENHEIT ? 'F' : 'C',
+        sht.readHumidity(), batteryPct, analogRead(BATTERY_PIN));
   }
 
   uint8_t total = totalSlots();

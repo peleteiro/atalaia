@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "author": "Watchlight",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "board-esp32-devkit-c-v4",
+      "id": "esp",
+      "top": 38.4,
+      "left": 0,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-led-matrix",
+      "id": "matrix",
+      "top": -153.6,
+      "left": 249.6,
+      "attrs": {
+        "rows": "8",
+        "cols": "32",
+        "layout": "serpentine",
+        "pixelShape": "square",
+        "pixelSize": "3535"
+      }
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "left",
+      "top": 307.2,
+      "left": 0,
+      "attrs": { "color": "blue", "label": "Left", "key": "ArrowLeft" }
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "middle",
+      "top": 307.2,
+      "left": 105.6,
+      "attrs": { "color": "green", "label": "Middle", "key": " " }
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "right",
+      "top": 307.2,
+      "left": 230.4,
+      "attrs": { "color": "blue", "label": "Right", "key": "ArrowRight" }
+    },
+    {
+      "type": "wokwi-potentiometer",
+      "id": "battery",
+      "top": 297.6,
+      "left": 355.2,
+      "attrs": { "value": "685" }
+    },
+    {
+      "type": "wokwi-buzzer",
+      "id": "buzzer",
+      "top": 307.2,
+      "left": 489.6,
+      "attrs": { "volume": "0.1" }
+    },
+    {
+      "type": "wokwi-ds1307",
+      "id": "rtc",
+      "top": 278.4,
+      "left": 614.4,
+      "attrs": { "initTime": "now" }
+    }
+  ],
+  "connections": [
+    ["esp:32", "matrix:DIN", "green", []],
+    ["esp:5V", "matrix:VDD", "red", []],
+    ["esp:GND.1", "matrix:VSS", "black", []],
+    ["esp:26", "left:1.l", "blue", []],
+    ["left:2.l", "esp:GND.1", "black", []],
+    ["esp:27", "middle:1.l", "blue", []],
+    ["middle:2.l", "esp:GND.1", "black", []],
+    ["esp:14", "right:1.l", "blue", []],
+    ["right:2.l", "esp:GND.1", "black", []],
+    ["esp:34", "battery:SIG", "orange", []],
+    ["esp:3V3", "battery:VCC", "red", []],
+    ["battery:GND", "esp:GND.1", "black", []],
+    ["esp:15", "buzzer:2", "purple", []],
+    ["buzzer:1", "esp:GND.1", "black", []],
+    ["esp:21", "rtc:SDA", "blue", []],
+    ["esp:22", "rtc:SCL", "yellow", []],
+    ["esp:5V", "rtc:5V", "red", []],
+    ["esp:GND.1", "rtc:GND", "black", []]
+  ],
+  "dependencies": {}
+}

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Run the default Wokwi simulator (VS Code)"
+set -euo pipefail
+exec mise run simulate:vscode

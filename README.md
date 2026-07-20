@@ -54,6 +54,11 @@ At a glance, the response looks like this (the icon is abbreviated here):
 The rotation interval is device-local, not part of the payload. Set
 `SCREEN_ROTATION_SECONDS` in `src/config.h`; the default is 8 seconds.
 
+Polling is device-local too. While the payload is fresh, Watchlight polls every
+15 minutes; once it is stale (or before the first successful fetch), it retries
+every minute. Configure both intervals with `POLL_INTERVAL_FRESH_SECONDS` and
+`POLL_INTERVAL_STALE_SECONDS` in `src/config.h`.
+
 The device renders the icon on the left 8×8 and the text — a small pixel font —
 **centered** in the remaining 24px. Icons may use full RGB: gradients and
 anti-aliased edges render fine (the panel is RGB per pixel), so a soft-edged 8×8
@@ -121,20 +126,77 @@ warning triangle in their place. This is deliberate: a panel showing yesterday's
 number with a fresh face is worse than one that admits it's blind. The local
 screens (clock, temp/humidity) keep rotating — they're never stale.
 
+## Wokwi simulation
+
+The repository includes a Wokwi circuit for firmware development without a
+physical TC001. It runs the real `src/main.cpp` against a simulated ESP32,
+32×8 serpentine WS2812 matrix, three active-low buttons, buzzer, and adjustable
+battery input.
+
+The Wokwi target deliberately uses the local `src/secrets.h`: `API_URL`,
+`API_TOKEN`, and `API_ROOT_CA` are the same values used by the physical device.
+Only WiFi association is overridden, because Wokwi cannot see the physical
+networks in `WIFI_NETWORKS`; the simulator joins its built-in `Wokwi-GUEST`
+network instead. As a result, the simulated firmware artifact contains the local
+credentials. Keep it private and do not share the artifact or simulation session.
+
+For the visual simulator:
+
+1. Run `mise run simulate`, which defaults to `mise run simulate:vscode`. It
+   builds the Wokwi target, opens this workspace in VS Code, and selects
+   [`diagram.json`](diagram.json).
+2. On the first run, install the workspace's recommended extensions and activate
+   the Wokwi license.
+3. Press the green play button (or run **Wokwi: Start Simulator** from the command
+   palette).
+
+The checked-in `.vscode` configuration recommends Wokwi, PlatformIO, C/C++, and
+TOML support. Its tasks call the same `mise` commands used in the terminal, so
+**Terminal → Run Task** also exposes build, Wokwi, check, format, upload, and
+monitor actions.
+
+Use the left/right arrow keys to navigate and the space bar for the middle
+button. The battery potentiometer drives GPIO 34; turn it down to exercise the
+low-battery screen. Button bounce remains enabled so the firmware's real debounce
+logic is exercised.
+
+For headless terminal runs, create a Wokwi CI token and configure it locally:
+
+```bash
+cp mise.local.example.toml mise.local.toml
+```
+
+Replace the placeholder in `mise.local.toml`, trust the local config if prompted,
+then run `mise run simulate:cli`. The Wokwi CLI itself is installed by `mise`;
+`mise.local.toml` and its optional lockfile are gitignored and preserved by
+`mise run clean`.
+
+The current circuit models the matrix, buttons, buzzer, battery ADC, and clock.
+Wokwi's DS1307 stands in for the TC001's DS3231 because both expose the basic RTC
+behavior through I2C address `0x68`; DS3231-specific behavior remains outside the
+simulator's scope. Wokwi does not provide the exact SHT3x part, so the
+temperature/humidity screen still needs hardware verification. Wokwi also cannot
+replace final orientation and electrical checks on real hardware.
+
 ## Setup
 
 1. Copy `src/secrets.example.h` → `src/secrets.h` and fill in your WiFi
    networks, `API_URL`, and `API_TOKEN`. `secrets.h` is gitignored.
-   Non-secret knobs (screen rotation, clock timezone, NTP servers, and temperature
-   calibration) live in `src/config.h`, which *is* committed — edit it in place.
+   Non-secret knobs (screen rotation, fresh/stale polling, clock timezone, NTP
+   servers, and temperature calibration) live in `src/config.h`, which *is*
+   committed — edit it in place.
 2. Build and flash — the task runner is [`mise`](https://mise.jdx.dev) (wrapping
    [PlatformIO](https://platformio.org)):
    ```bash
-   mise run build     # compile
-   mise run check     # static analysis (cppcheck)
-   mise run lint      # format the firmware (clang-format)
-   mise run upload    # build + flash over USB
-   mise run monitor   # serial logs at 115200
+   mise run build          # compile
+   mise run check          # static analysis + Wokwi diagram validation
+   mise run lint           # format the firmware (clang-format)
+   mise run simulate-build # compile the Wokwi target
+   mise run simulate        # visual Wokwi simulator in VS Code (default)
+   mise run simulate:vscode # explicitly select the VS Code simulator
+   mise run simulate:cli    # run headlessly (requires WOKWI_CLI_TOKEN)
+   mise run upload         # build + flash over USB
+   mise run monitor        # serial logs at 115200
    ```
    The upload uses `upload_speed = 115200` (higher rates were unreliable on the
    test adapter). If a flash drops mid-transfer, retry — it's usually the USB cable.
@@ -177,6 +239,7 @@ boot, WiFi, fetch, NTP, sensor, and button events for troubleshooting.
 
 - [mise](https://mise.jdx.dev) — task runner and hermetic tool manager (`mise run …`)
 - [PlatformIO](https://platformio.org) — build/flash/monitor toolchain for the ESP32
+- [Wokwi](https://wokwi.com) — ESP32, circuit, and 32×8 matrix simulation
 
 **Libraries** (see `platformio.ini`)
 
